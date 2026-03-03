@@ -1,1 +1,1 @@
-# cointegration_scanner
+# arbitrage_tracker

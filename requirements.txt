@@ -1,0 +1,15 @@
+# Arbitrage Tracker - Read-only post-hoc analysis of Solana arbitrage transactions
+
+# gRPC & Protocol Buffers
+grpcio>=1.50.0,<2.0.0
+grpcio-tools>=1.50.0,<2.0.0
+protobuf>=6.31.1,<7.0.0
+
+# Solana
+solana>=0.30.0,<1.0.0
+solders>=0.18.0,<1.0.0
+base58>=2.1.0,<3.0.0
+
+# Utilities
+python-dotenv>=1.0.0,<2.0.0
+aiohttp>=3.8.0,<4.0.0
