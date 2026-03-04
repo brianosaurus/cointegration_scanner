@@ -200,5 +200,11 @@ WELL_KNOWN_TOKENS = {
     JUPSOL_MINT: {"symbol": "jupSOL", "name": "Jupiter SOL", "decimals": 9},
 }
 
+# Stablecoin mints (for quote-token normalization)
+STABLECOIN_MINTS = {USDC_MINT, USDT_MINT, USDH_MINT}
+
+# Quote token priority for price normalization (most preferred first)
+QUOTE_PRIORITY = [USDC_MINT, USDT_MINT, USDH_MINT, SOL_MINT]
+
 # URLs
 SOLSCAN_TX_BASE_URL = "https://solscan.io/tx/"

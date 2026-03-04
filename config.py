@@ -21,6 +21,7 @@ class Config:
     rpc_url: str = os.getenv('SOLANA_RPC_URL', 'https://api.mainnet-beta.solana.com')
     grpc_endpoint: str = os.getenv('GRPC_ENDPOINT', 'api.mainnet-beta.solana.com:443')
     grpc_token: str = os.getenv('GRPC_TOKEN', '')
+    birdeye_api_key: str = os.getenv('BIRDEYE_API_KEY', '')
 
     def print_config_summary(self):
         logger.info(f"Config: RPC={self.rpc_url}, gRPC={self.grpc_endpoint}")
