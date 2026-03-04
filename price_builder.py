@@ -145,7 +145,10 @@ class PriceBuilder:
         """Load previously cached external prices from the database."""
         tokens = token_filter or set()
         if not tokens:
+            # Check both swap_legs and price_cache for discovered tokens
             tokens = set(self.db.get_distinct_tokens())
+            cached_tokens = self.db.get_cached_tokens()
+            tokens.update(cached_tokens)
 
         prices = []
         for mint in tokens:
@@ -226,7 +229,7 @@ class PriceBuilder:
         if time_to is None:
             time_to = int(time.time())
         if time_from is None:
-            time_from = time_to - 86400  # Last 24 hours
+            time_from = time_to - 86400 * 7  # Last 7 days
 
         prices = []
         headers = {

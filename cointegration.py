@@ -83,15 +83,34 @@ class CointegrationAnalyzer:
         if token_filter:
             mints = [m for m in mints if m in token_filter]
 
-        # Prioritize well-known tokens (sort them first)
+        # Build pairs with diverse coverage, not just SOL/X
         known = [m for m in mints if m in WELL_KNOWN_TOKENS]
         unknown = [m for m in mints if m not in WELL_KNOWN_TOKENS]
-        mints = known + unknown
 
-        all_pairs = list(combinations(mints, 2))
+        # Sort unknown tokens by data density (most observations first)
+        unknown.sort(key=lambda m: len(series[m]), reverse=True)
+
+        # Priority tiers:
+        # 1. known-known pairs (e.g. SOL/mSOL, USDC/USDT) — always include
+        # 2. known-unknown pairs — sample top unknown tokens against each known
+        # 3. unknown-unknown pairs — sample top pairs by data overlap
+        tier1 = list(combinations(known, 2))
+
+        tier2 = []
+        for k in known:
+            for u in unknown:
+                tier2.append((k, u))
+
+        tier3 = list(combinations(unknown[:50], 2))  # top 50 unknown by data
+
+        total_possible = len(tier1) + len(tier2) + len(tier3)
+        all_pairs = tier1 + tier2 + tier3
+
         if len(all_pairs) > self.max_pairs:
-            logger.info(f"Limiting to {self.max_pairs} pairs (of {len(all_pairs)} possible)")
-            all_pairs = all_pairs[:self.max_pairs]
+            # Keep all tier1, then fill from tier2 and tier3
+            budget = self.max_pairs - len(tier1)
+            all_pairs = tier1 + (tier2 + tier3)[:budget]
+            logger.info(f"Limiting to {len(all_pairs)} pairs (of {total_possible} possible)")
 
         logger.info(f"Analyzing {len(all_pairs)} pairs from {len(mints)} tokens")
 

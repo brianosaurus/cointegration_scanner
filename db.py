@@ -253,6 +253,13 @@ class Database:
         """).fetchall()
         return [r[0] for r in rows]
 
+    def get_cached_tokens(self) -> list:
+        """Get all distinct token mints in price_cache."""
+        rows = self.conn.execute(
+            "SELECT DISTINCT token_mint FROM price_cache"
+        ).fetchall()
+        return [r[0] for r in rows]
+
     # --- Cointegration results methods ---
 
     def save_cointegration_result(self, result) -> None:
