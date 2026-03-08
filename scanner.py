@@ -65,6 +65,10 @@ def parse_args():
                         help='Max number of pairs to test (default: 500)')
     parser.add_argument('--fetch-external', action='store_true',
                         help='Fetch external price data from Birdeye/DexScreener')
+    parser.add_argument('--loop', action='store_true',
+                        help='Run continuously in a loop')
+    parser.add_argument('--interval', type=int, default=60,
+                        help='Seconds between loop iterations (default: 60)')
     parser.add_argument('--verbose', action='store_true',
                         help='Enable debug logging')
     return parser.parse_args()
@@ -221,6 +225,9 @@ async def run_scan(db: Database, config: Config, args):
         db.save_cointegration_result(r)
 
     cointegrated = sum(1 for r in results if r.eg_is_cointegrated or r.johansen_is_cointegrated)
+    removed = db.delete_stale_cointegration_results()
+    if removed:
+        print(f"  Removed {removed} pairs that are no longer cointegrated")
     db.update_scanner_run(run_id, len(series), len(results), cointegrated)
 
     # Display results
@@ -297,7 +304,17 @@ def main():
     db = Database(args.db)
 
     try:
-        if args.scan:
+        if args.scan and args.loop:
+            iteration = 0
+            while True:
+                iteration += 1
+                print(f"\n{'='*60}")
+                print(f"  Loop iteration {iteration}")
+                print(f"{'='*60}")
+                asyncio.run(run_scan(db, config, args))
+                print(f"\n  Sleeping {args.interval}s until next scan...")
+                time.sleep(args.interval)
+        elif args.scan:
             asyncio.run(run_scan(db, config, args))
         elif args.zscore:
             asyncio.run(run_zscore(db, config, args))

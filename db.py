@@ -263,7 +263,12 @@ class Database:
     # --- Cointegration results methods ---
 
     def save_cointegration_result(self, result) -> None:
-        """Save a CointegrationResult to the database."""
+        """Upsert a CointegrationResult — one row per (token_a_mint, token_b_mint) pair."""
+        # Delete any existing rows for this pair, then insert fresh
+        self.conn.execute(
+            "DELETE FROM cointegration_results WHERE token_a_mint = ? AND token_b_mint = ?",
+            (result.token_a_mint, result.token_b_mint),
+        )
         self.conn.execute(
             """INSERT INTO cointegration_results
                (token_a_mint, token_b_mint, token_a_symbol, token_b_symbol,
@@ -284,6 +289,15 @@ class Database:
              result.quote_token, result.analyzed_at),
         )
         self.conn.commit()
+
+    def delete_stale_cointegration_results(self) -> int:
+        """Remove pairs that are no longer cointegrated. Returns count deleted."""
+        cursor = self.conn.execute(
+            """DELETE FROM cointegration_results
+               WHERE eg_is_cointegrated = 0 AND johansen_is_cointegrated = 0""",
+        )
+        self.conn.commit()
+        return cursor.rowcount
 
     def get_cointegration_results(self, cointegrated_only: bool = False,
                                   latest_only: bool = True) -> list:
