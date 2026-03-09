@@ -209,13 +209,17 @@ class Database:
         self.conn.commit()
 
     def get_cached_prices(self, token_mint: str, quote_mint: str = None,
-                          start_time: int = 0, end_time: int = None) -> list:
-        """Get cached prices for a token, optionally filtered by quote and time range."""
+                          start_time: int = 0, end_time: int = None,
+                          source: str = None) -> list:
+        """Get cached prices for a token, optionally filtered by quote, time range, and source."""
         query = "SELECT token_mint, quote_mint, price, timestamp, source FROM price_cache WHERE token_mint = ?"
         params: list = [token_mint]
         if quote_mint:
             query += " AND quote_mint = ?"
             params.append(quote_mint)
+        if source:
+            query += " AND source = ?"
+            params.append(source)
         if start_time:
             query += " AND timestamp >= ?"
             params.append(start_time)

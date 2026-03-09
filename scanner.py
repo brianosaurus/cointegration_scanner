@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """
-Cointegration Scanner — statistical pair analysis of Solana token prices
+Cointegration Scanner — statistical pair analysis of Solana token prices via Jupiter
 
 Usage:
-    python scanner.py --scan                          # Full scan of all token pairs
+    python scanner.py --scan                          # Fetch Jupiter prices + scan pairs
     python scanner.py --scan --tokens SOL,USDC,RAY    # Specific tokens only
     python scanner.py --scan --top 20                 # Show top 20 pairs
-    python scanner.py --scan --fetch-external         # Supplement with Birdeye/DexScreener
+    python scanner.py --scan --loop --interval 60     # Accumulate prices over time
+    python scanner.py --scan --no-fetch               # Use cached prices only
     python scanner.py --zscore                        # Update z-scores for known pairs
 """
 
@@ -57,18 +58,16 @@ def parse_args():
                         help='Minimum overlapping data points per pair (default: 100)')
     parser.add_argument('--p-threshold', type=float, default=0.05,
                         help='P-value threshold for cointegration (default: 0.05)')
-    parser.add_argument('--resample', type=str, default='5min',
-                        help='Resample interval for price data (default: 5min)')
     parser.add_argument('--lookback', type=int, default=60,
                         help='Lookback periods for z-score window (default: 60)')
     parser.add_argument('--max-pairs', type=int, default=500,
                         help='Max number of pairs to test (default: 500)')
-    parser.add_argument('--fetch-external', action='store_true',
-                        help='Fetch external price data from Birdeye/DexScreener')
+    parser.add_argument('--no-fetch', action='store_true',
+                        help='Skip fetching new Jupiter prices (use cached only)')
     parser.add_argument('--loop', action='store_true',
                         help='Run continuously in a loop')
-    parser.add_argument('--interval', type=int, default=60,
-                        help='Seconds between loop iterations (default: 60)')
+    parser.add_argument('--interval', type=int, default=30,
+                        help='Seconds between loop iterations (default: 30)')
     parser.add_argument('--verbose', action='store_true',
                         help='Enable debug logging')
     return parser.parse_args()
@@ -92,19 +91,6 @@ def resolve_token_filter(token_str: str) -> set:
 
     return mints
 
-
-def resample_to_minutes(interval_str: str) -> float:
-    """Convert resample string like '5min' or '1h' to minutes."""
-    s = interval_str.lower().strip()
-    if s.endswith('min'):
-        return float(s[:-3])
-    elif s.endswith('h'):
-        return float(s[:-1]) * 60
-    elif s.endswith('d'):
-        return float(s[:-1]) * 1440
-    elif s.endswith('s'):
-        return float(s[:-1]) / 60
-    return 5.0  # default
 
 
 def write_csv(filepath: str, results: list):
@@ -136,27 +122,12 @@ def write_csv(filepath: str, results: list):
     logger.info(f"Wrote {len(results)} results to {filepath}")
 
 
-async def fetch_external_prices(price_builder: PriceBuilder, token_mints: list):
-    """Fetch prices from external APIs."""
-    print("  Fetching external prices...")
-
-    # Birdeye (if API key configured)
-    birdeye_prices = await price_builder.fetch_birdeye_prices(token_mints)
-    if birdeye_prices:
-        print(f"    Birdeye: {len(birdeye_prices)} prices fetched")
-
-    # DexScreener (free)
-    dex_prices = await price_builder.fetch_dexscreener_prices(token_mints)
-    if dex_prices:
-        print(f"    DexScreener: {len(dex_prices)} prices fetched")
-
-    # Jupiter (free, current prices only)
+async def fetch_jupiter_prices(price_builder: PriceBuilder, token_mints: list):
+    """Fetch current prices from Jupiter API."""
+    print("  Fetching Jupiter prices...")
     jup_prices = await price_builder.fetch_jupiter_prices(token_mints)
-    if jup_prices:
-        print(f"    Jupiter: {len(jup_prices)} prices fetched")
-
-    total = len(birdeye_prices) + len(dex_prices) + len(jup_prices)
-    print(f"    Total external prices: {total}")
+    print(f"    Jupiter: {len(jup_prices)} prices fetched")
+    return jup_prices
 
 
 async def run_scan(db: Database, config: Config, args):
@@ -164,40 +135,33 @@ async def run_scan(db: Database, config: Config, args):
     start_time = time.time()
 
     token_filter = resolve_token_filter(args.tokens)
-    resample_min = resample_to_minutes(args.resample)
 
     # Save run to DB
     run_config = {
         'tokens': args.tokens,
         'min_observations': args.min_observations,
         'p_threshold': args.p_threshold,
-        'resample': args.resample,
+        'interval': args.interval,
         'lookback': args.lookback,
-        'fetch_external': args.fetch_external,
     }
     run_id = db.save_scanner_run(json.dumps(run_config))
 
     # Build price series
     price_builder = PriceBuilder(db, config)
 
-    # Fetch external prices first if requested
-    if args.fetch_external:
+    # Fetch Jupiter prices (unless --no-fetch)
+    if not args.no_fetch:
         if token_filter:
-            ext_mints = list(token_filter)
+            mints = list(token_filter)
         else:
-            ext_mints = list(WELL_KNOWN_TOKENS.keys())
-        await fetch_external_prices(price_builder, ext_mints)
+            mints = list(WELL_KNOWN_TOKENS.keys())
+        await fetch_jupiter_prices(price_builder, mints)
 
-    print(f"\n  Building price series (resample: {args.resample})...")
-    series = price_builder.build_all_series(
-        resample_interval=args.resample,
-        token_filter=token_filter,
-        max_gap_fill=3,
-    )
+    print(f"\n  Building price series...")
+    series = price_builder.build_all_series(token_filter=token_filter)
 
     if not series:
-        print("\n  No price data available. Run tracker.py first to collect swap data,")
-        print("  or use --fetch-external to fetch prices from APIs.")
+        print("\n  No price data available. Run with --loop to accumulate Jupiter prices over time.")
         db.update_scanner_run(run_id, 0, 0, 0)
         return
 
@@ -232,7 +196,9 @@ async def run_scan(db: Database, config: Config, args):
 
     # Display results
     elapsed = time.time() - start_time
-    print_scan_summary(results, elapsed, top_n=args.top, resample_minutes=resample_min)
+    # Half-life is in observation units; each observation is args.interval seconds apart
+    obs_minutes = args.interval / 60.0
+    print_scan_summary(results, elapsed, top_n=args.top, resample_minutes=obs_minutes)
 
     # Write CSV
     write_csv(args.csv, results)
@@ -247,15 +213,19 @@ async def run_zscore(db: Database, config: Config, args):
         print("\n  No cointegrated pairs in database. Run --scan first.")
         return
 
-    # Rebuild price series to recompute z-scores
+    # Fetch fresh Jupiter prices and rebuild series
     price_builder = PriceBuilder(db, config)
     token_filter = resolve_token_filter(args.tokens)
 
-    series = price_builder.build_all_series(
-        resample_interval=args.resample,
-        token_filter=token_filter,
-        max_gap_fill=3,
-    )
+    if not args.no_fetch:
+        # Fetch prices for all tokens in cointegrated pairs
+        pair_mints = set()
+        for row in rows:
+            pair_mints.add(row[1])  # token_a_mint
+            pair_mints.add(row[2])  # token_b_mint
+        await fetch_jupiter_prices(price_builder, list(pair_mints))
+
+    series = price_builder.build_all_series(token_filter=token_filter)
 
     if not series:
         print("\n  No price data available for z-score update.")

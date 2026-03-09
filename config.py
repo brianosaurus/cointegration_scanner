@@ -22,6 +22,8 @@ class Config:
     grpc_endpoint: str = os.getenv('GRPC_ENDPOINT', 'api.mainnet-beta.solana.com:443')
     grpc_token: str = os.getenv('GRPC_TOKEN', '')
     birdeye_api_key: str = os.getenv('BIRDEYE_API_KEY', '')
+    jupiter_api_key: str = os.getenv('JUPITER_API_KEY', '')
+    jupiter_api_url: str = os.getenv('JUPITER_QUOTE_URL', 'https://api.jup.ag')
 
     def print_config_summary(self):
         logger.info(f"Config: RPC={self.rpc_url}, gRPC={self.grpc_endpoint}")
