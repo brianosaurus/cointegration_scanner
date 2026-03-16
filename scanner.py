@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
 """
-Cointegration Scanner — statistical pair analysis of Solana token prices via Jupiter
+Cointegration Scanner — statistical basket analysis of Solana token prices via Jupiter
 
 Usage:
-    python scanner.py --scan                          # Fetch Jupiter prices + scan pairs
+    python scanner.py --scan                          # Fetch Jupiter prices + scan baskets
+    python scanner.py --scan --basket-size 2          # Pairs only
     python scanner.py --scan --tokens SOL,USDC,RAY    # Specific tokens only
-    python scanner.py --scan --top 20                 # Show top 20 pairs
-    python scanner.py --scan --loop --interval 60     # Accumulate prices over time
+    python scanner.py --scan --top 20                 # Show top 20 baskets
+    python scanner.py --scan --loop --interval 30     # Accumulate prices over time
     python scanner.py --scan --no-fetch               # Use cached prices only
-    python scanner.py --zscore                        # Update z-scores for known pairs
+    python scanner.py --zscore                        # Update z-scores for known baskets
 """
 
 import argparse
@@ -31,21 +32,21 @@ logger = logging.getLogger(__name__)
 
 # CSV columns for cointegration export
 COINT_CSV_COLUMNS = [
-    'token_a_symbol', 'token_b_symbol', 'token_a_mint', 'token_b_mint',
+    'symbols', 'mints', 'basket_size',
     'eg_p_value', 'eg_is_cointegrated', 'johansen_rank', 'johansen_is_cointegrated',
-    'hedge_ratio', 'spread_mean', 'spread_std', 'current_spread', 'current_zscore',
+    'hedge_ratios', 'spread_mean', 'spread_std', 'current_spread', 'current_zscore',
     'half_life', 'correlation', 'num_observations', 'quote_token',
 ]
 
 
 def parse_args():
     parser = argparse.ArgumentParser(
-        description='Scan for cointegrated token pairs on Solana',
+        description='Scan for cointegrated token baskets on Solana',
     )
     parser.add_argument('--scan', action='store_true',
-                        help='Run cointegration analysis on all discovered pairs')
+                        help='Run cointegration analysis on token baskets')
     parser.add_argument('--zscore', action='store_true',
-                        help='Show current z-scores for previously identified pairs')
+                        help='Show current z-scores for previously identified baskets')
     parser.add_argument('--db', type=str, default='arb_tracker.db',
                         help='SQLite database path (default: arb_tracker.db)')
     parser.add_argument('--csv', type=str, default='cointegration.csv',
@@ -53,15 +54,17 @@ def parse_args():
     parser.add_argument('--tokens', type=str, default=None,
                         help='Comma-separated token symbols to analyze (default: all)')
     parser.add_argument('--top', type=int, default=50,
-                        help='Show top N pairs by significance (default: 50)')
+                        help='Show top N baskets by significance (default: 50)')
     parser.add_argument('--min-observations', type=int, default=100,
-                        help='Minimum overlapping data points per pair (default: 100)')
+                        help='Minimum overlapping data points per basket (default: 100)')
     parser.add_argument('--p-threshold', type=float, default=0.05,
                         help='P-value threshold for cointegration (default: 0.05)')
     parser.add_argument('--lookback', type=int, default=60,
                         help='Lookback periods for z-score window (default: 60)')
-    parser.add_argument('--max-pairs', type=int, default=500,
-                        help='Max number of pairs to test (default: 500)')
+    parser.add_argument('--max-baskets', type=int, default=500,
+                        help='Max number of baskets to test (default: 500)')
+    parser.add_argument('--basket-size', type=int, default=4, choices=[2, 3, 4],
+                        help='Number of tokens per basket (default: 4)')
     parser.add_argument('--no-fetch', action='store_true',
                         help='Skip fetching new Jupiter prices (use cached only)')
     parser.add_argument('--loop', action='store_true',
@@ -86,30 +89,26 @@ def resolve_token_filter(token_str: str) -> set:
         if sym in symbol_to_mint:
             mints.add(symbol_to_mint[sym])
         else:
-            # Assume it's a mint address
             mints.add(sym)
 
     return mints
 
 
-
 def write_csv(filepath: str, results: list):
     """Write cointegration results to CSV."""
-    write_header = not os.path.exists(filepath) or os.path.getsize(filepath) == 0
     with open(filepath, 'w', newline='') as f:
         writer = csv.DictWriter(f, fieldnames=COINT_CSV_COLUMNS)
         writer.writeheader()
         for r in results:
             writer.writerow({
-                'token_a_symbol': r.token_a_symbol,
-                'token_b_symbol': r.token_b_symbol,
-                'token_a_mint': r.token_a_mint,
-                'token_b_mint': r.token_b_mint,
-                'eg_p_value': f'{r.eg_p_value:.6f}',
+                'symbols': '/'.join(r.symbols),
+                'mints': ','.join(r.mints),
+                'basket_size': r.basket_size,
+                'eg_p_value': f'{r.eg_p_value:.6f}' if r.eg_p_value is not None else '',
                 'eg_is_cointegrated': int(r.eg_is_cointegrated),
                 'johansen_rank': r.johansen_rank,
                 'johansen_is_cointegrated': int(r.johansen_is_cointegrated),
-                'hedge_ratio': f'{r.hedge_ratio:.6f}',
+                'hedge_ratios': json.dumps([round(w, 6) for w in r.hedge_ratios]),
                 'spread_mean': f'{r.spread_mean:.6f}',
                 'spread_std': f'{r.spread_std:.6f}',
                 'current_spread': f'{r.current_spread:.6f}',
@@ -136,20 +135,18 @@ async def run_scan(db: Database, config: Config, args):
 
     token_filter = resolve_token_filter(args.tokens)
 
-    # Save run to DB
     run_config = {
         'tokens': args.tokens,
         'min_observations': args.min_observations,
         'p_threshold': args.p_threshold,
         'interval': args.interval,
         'lookback': args.lookback,
+        'basket_size': args.basket_size,
     }
     run_id = db.save_scanner_run(json.dumps(run_config))
 
-    # Build price series
     price_builder = PriceBuilder(db, config)
 
-    # Fetch Jupiter prices (unless --no-fetch)
     if not args.no_fetch:
         if token_filter:
             mints = list(token_filter)
@@ -175,28 +172,28 @@ async def run_scan(db: Database, config: Config, args):
         print(f"    ... and {len(series) - 10} more")
 
     # Run cointegration analysis
-    print(f"\n  Running cointegration tests (p < {args.p_threshold})...")
+    print(f"\n  Running cointegration tests (basket size {args.basket_size}, p < {args.p_threshold})...")
     analyzer = CointegrationAnalyzer(
         min_observations=args.min_observations,
         p_threshold=args.p_threshold,
         lookback=args.lookback,
-        max_pairs=args.max_pairs,
+        max_pairs=args.max_baskets,
+        basket_size=args.basket_size,
     )
-    results = analyzer.analyze_all_pairs(series, token_filter)
+    results = analyzer.analyze_all_baskets(series, token_filter)
 
     # Save results to DB
     for r in results:
         db.save_cointegration_result(r)
 
-    cointegrated = sum(1 for r in results if r.eg_is_cointegrated or r.johansen_is_cointegrated)
+    cointegrated = sum(1 for r in results if r.johansen_is_cointegrated)
     removed = db.delete_stale_cointegration_results()
     if removed:
-        print(f"  Removed {removed} pairs that are no longer cointegrated")
+        print(f"  Removed {removed} baskets that are no longer cointegrated")
     db.update_scanner_run(run_id, len(series), len(results), cointegrated)
 
     # Display results
     elapsed = time.time() - start_time
-    # Half-life is in observation units; each observation is args.interval seconds apart
     obs_minutes = args.interval / 60.0
     print_scan_summary(results, elapsed, top_n=args.top, resample_minutes=obs_minutes)
 
@@ -206,24 +203,21 @@ async def run_scan(db: Database, config: Config, args):
 
 
 async def run_zscore(db: Database, config: Config, args):
-    """Update z-scores for previously identified cointegrated pairs."""
-    # Get latest cointegration results
+    """Update z-scores for previously identified cointegrated baskets."""
     rows = db.get_cointegration_results(cointegrated_only=True)
     if not rows:
-        print("\n  No cointegrated pairs in database. Run --scan first.")
+        print("\n  No cointegrated baskets in database. Run --scan first.")
         return
 
-    # Fetch fresh Jupiter prices and rebuild series
     price_builder = PriceBuilder(db, config)
     token_filter = resolve_token_filter(args.tokens)
 
     if not args.no_fetch:
-        # Fetch prices for all tokens in cointegrated pairs
-        pair_mints = set()
+        # Fetch prices for all tokens in cointegrated baskets
+        all_mints = set()
         for row in rows:
-            pair_mints.add(row[1])  # token_a_mint
-            pair_mints.add(row[2])  # token_b_mint
-        await fetch_jupiter_prices(price_builder, list(pair_mints))
+            all_mints.update(row['mints'])
+        await fetch_jupiter_prices(price_builder, list(all_mints))
 
     series = price_builder.build_all_series(token_filter=token_filter)
 
@@ -231,33 +225,30 @@ async def run_zscore(db: Database, config: Config, args):
         print("\n  No price data available for z-score update.")
         return
 
-    # Re-analyze only previously cointegrated pairs
     analyzer = CointegrationAnalyzer(
         min_observations=args.min_observations,
         p_threshold=args.p_threshold,
         lookback=args.lookback,
+        basket_size=args.basket_size,
     )
 
     results = []
     for row in rows:
-        mint_a = row[1]  # token_a_mint
-        mint_b = row[2]  # token_b_mint
-        if mint_a in series and mint_b in series:
-            result = analyzer.analyze_pair(series[mint_a], series[mint_b], mint_a, mint_b)
+        basket_mints = row['mints']
+        if all(m in series for m in basket_mints):
+            series_list = [series[m] for m in basket_mints]
+            result = analyzer.analyze_basket(series_list, basket_mints)
             if result:
                 results.append(result)
                 db.save_cointegration_result(result)
 
-    # Sort by z-score magnitude
     results.sort(key=lambda r: abs(r.current_zscore), reverse=True)
-
     print_zscore_table(results)
 
 
 def main():
     args = parse_args()
 
-    # Setup logging
     level = logging.DEBUG if args.verbose else logging.INFO
     logging.basicConfig(
         level=level,

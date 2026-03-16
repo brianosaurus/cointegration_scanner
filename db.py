@@ -19,7 +19,19 @@ class Database:
         self.db_path = db_path
         self.conn = sqlite3.connect(db_path)
         self.conn.execute("PRAGMA journal_mode=WAL")
+        self._migrate_cointegration_table()
         self._create_tables()
+
+    def _migrate_cointegration_table(self):
+        """Drop old pair-based cointegration_results table if it exists."""
+        try:
+            cols = [r[1] for r in self.conn.execute("PRAGMA table_info(cointegration_results)").fetchall()]
+            if 'token_a_mint' in cols:
+                logger.info("Migrating cointegration_results table from pair to basket schema")
+                self.conn.execute("DROP TABLE cointegration_results")
+                self.conn.commit()
+        except sqlite3.OperationalError:
+            pass  # Table doesn't exist yet
 
     def _create_tables(self):
         self.conn.executescript("""
@@ -78,10 +90,10 @@ class Database:
 
             CREATE TABLE IF NOT EXISTS cointegration_results (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                token_a_mint TEXT NOT NULL,
-                token_b_mint TEXT NOT NULL,
-                token_a_symbol TEXT NOT NULL,
-                token_b_symbol TEXT NOT NULL,
+                basket_key TEXT NOT NULL UNIQUE,
+                basket_size INTEGER NOT NULL,
+                mints_json TEXT NOT NULL,
+                symbols_json TEXT NOT NULL,
                 eg_test_statistic REAL,
                 eg_p_value REAL,
                 eg_is_cointegrated INTEGER NOT NULL DEFAULT 0,
@@ -89,7 +101,7 @@ class Database:
                 johansen_eigen_stat REAL,
                 johansen_rank INTEGER,
                 johansen_is_cointegrated INTEGER NOT NULL DEFAULT 0,
-                hedge_ratio REAL,
+                hedge_ratios_json TEXT NOT NULL,
                 spread_mean REAL,
                 spread_std REAL,
                 current_spread REAL,
@@ -114,8 +126,8 @@ class Database:
             );
 
             CREATE INDEX IF NOT EXISTS idx_price_cache_token ON price_cache(token_mint, timestamp);
-            CREATE INDEX IF NOT EXISTS idx_coint_pair ON cointegration_results(token_a_mint, token_b_mint);
             CREATE INDEX IF NOT EXISTS idx_coint_zscore ON cointegration_results(current_zscore);
+            CREATE INDEX IF NOT EXISTS idx_coint_size ON cointegration_results(basket_size);
         """)
         self.conn.commit()
 
@@ -267,26 +279,21 @@ class Database:
     # --- Cointegration results methods ---
 
     def save_cointegration_result(self, result) -> None:
-        """Upsert a CointegrationResult — one row per (token_a_mint, token_b_mint) pair."""
-        # Delete any existing rows for this pair, then insert fresh
+        """Upsert a CointegrationResult keyed on basket_key."""
         self.conn.execute(
-            "DELETE FROM cointegration_results WHERE token_a_mint = ? AND token_b_mint = ?",
-            (result.token_a_mint, result.token_b_mint),
-        )
-        self.conn.execute(
-            """INSERT INTO cointegration_results
-               (token_a_mint, token_b_mint, token_a_symbol, token_b_symbol,
+            """INSERT OR REPLACE INTO cointegration_results
+               (basket_key, basket_size, mints_json, symbols_json,
                 eg_test_statistic, eg_p_value, eg_is_cointegrated,
                 johansen_trace_stat, johansen_eigen_stat, johansen_rank, johansen_is_cointegrated,
-                hedge_ratio, spread_mean, spread_std, current_spread, current_zscore,
+                hedge_ratios_json, spread_mean, spread_std, current_spread, current_zscore,
                 half_life, correlation, num_observations, start_time, end_time, quote_token, analyzed_at)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (result.token_a_mint, result.token_b_mint,
-             result.token_a_symbol, result.token_b_symbol,
+            (result.basket_key, result.basket_size,
+             json.dumps(result.mints), json.dumps(result.symbols),
              result.eg_test_statistic, result.eg_p_value, int(result.eg_is_cointegrated),
              result.johansen_trace_stat, result.johansen_eigen_stat,
              result.johansen_rank, int(result.johansen_is_cointegrated),
-             result.hedge_ratio, result.spread_mean, result.spread_std,
+             json.dumps(result.hedge_ratios), result.spread_mean, result.spread_std,
              result.current_spread, result.current_zscore,
              result.half_life, result.correlation,
              result.num_observations, result.start_time, result.end_time,
@@ -295,7 +302,7 @@ class Database:
         self.conn.commit()
 
     def delete_stale_cointegration_results(self) -> int:
-        """Remove pairs that are no longer cointegrated. Returns count deleted."""
+        """Remove baskets that are no longer cointegrated. Returns count deleted."""
         cursor = self.conn.execute(
             """DELETE FROM cointegration_results
                WHERE eg_is_cointegrated = 0 AND johansen_is_cointegrated = 0""",
@@ -303,28 +310,27 @@ class Database:
         self.conn.commit()
         return cursor.rowcount
 
-    def get_cointegration_results(self, cointegrated_only: bool = False,
-                                  latest_only: bool = True) -> list:
-        """Get cointegration results, optionally filtered."""
-        if latest_only:
-            query = """
-                SELECT * FROM cointegration_results
-                WHERE id IN (
-                    SELECT MAX(id) FROM cointegration_results
-                    GROUP BY token_a_mint, token_b_mint
-                )
-            """
-        else:
-            query = "SELECT * FROM cointegration_results"
+    def get_cointegration_results(self, cointegrated_only: bool = False) -> list:
+        """Get cointegration results as list of dicts."""
+        query = "SELECT * FROM cointegration_results"
 
         if cointegrated_only:
-            if "WHERE" in query:
-                query += " AND (eg_is_cointegrated = 1 OR johansen_is_cointegrated = 1)"
-            else:
-                query += " WHERE (eg_is_cointegrated = 1 OR johansen_is_cointegrated = 1)"
+            query += " WHERE (eg_is_cointegrated = 1 OR johansen_is_cointegrated = 1)"
 
-        query += " ORDER BY eg_p_value ASC"
-        return self.conn.execute(query).fetchall()
+        query += " ORDER BY johansen_trace_stat DESC"
+        rows = self.conn.execute(query).fetchall()
+
+        # Get column names
+        cols = [desc[0] for desc in self.conn.execute("SELECT * FROM cointegration_results LIMIT 0").description]
+
+        results = []
+        for row in rows:
+            d = dict(zip(cols, row))
+            d['mints'] = json.loads(d['mints_json'])
+            d['symbols'] = json.loads(d['symbols_json'])
+            d['hedge_ratios'] = json.loads(d['hedge_ratios_json'])
+            results.append(d)
+        return results
 
     # --- Scanner run methods ---
 
