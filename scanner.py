@@ -171,16 +171,19 @@ async def run_scan(db: Database, config: Config, args):
     if len(series) > 10:
         print(f"    ... and {len(series) - 10} more")
 
-    # Run cointegration analysis
-    print(f"\n  Running cointegration tests (basket size {args.basket_size}, p < {args.p_threshold})...")
-    analyzer = CointegrationAnalyzer(
-        min_observations=args.min_observations,
-        p_threshold=args.p_threshold,
-        lookback=args.lookback,
-        max_pairs=args.max_baskets,
-        basket_size=args.basket_size,
-    )
-    results = analyzer.analyze_all_baskets(series, token_filter)
+    # Run cointegration analysis for each basket size up to requested
+    results = []
+    for bs in range(2, args.basket_size + 1):
+        print(f"\n  Running cointegration tests (basket size {bs}, p < {args.p_threshold})...")
+        analyzer = CointegrationAnalyzer(
+            min_observations=args.min_observations,
+            p_threshold=args.p_threshold,
+            lookback=args.lookback,
+            max_pairs=args.max_baskets,
+            basket_size=bs,
+        )
+        batch = analyzer.analyze_all_baskets(series, token_filter)
+        results.extend(batch)
 
     # Save results to DB
     for r in results:

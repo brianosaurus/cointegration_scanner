@@ -302,10 +302,13 @@ class Database:
         self.conn.commit()
 
     def delete_stale_cointegration_results(self) -> int:
-        """Remove baskets that are no longer cointegrated. Returns count deleted."""
+        """Remove baskets that are no longer cointegrated. Returns count deleted.
+        For 2-token pairs: require both EG and Johansen to fail.
+        For multi-token baskets: only Johansen matters (EG doesn't apply)."""
         cursor = self.conn.execute(
             """DELETE FROM cointegration_results
-               WHERE eg_is_cointegrated = 0 AND johansen_is_cointegrated = 0""",
+               WHERE (basket_size = 2 AND eg_is_cointegrated = 0 AND johansen_is_cointegrated = 0)
+                  OR (basket_size > 2 AND johansen_is_cointegrated = 0)""",
         )
         self.conn.commit()
         return cursor.rowcount
