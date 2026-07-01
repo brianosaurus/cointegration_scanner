@@ -10,7 +10,7 @@ from dataclasses import dataclass, field
 from typing import List, Dict, Optional
 
 from swap_detector import SwapDetector
-from grpc_utils import extract_signer, extract_addresses, contains_jito_tip_account
+from grpc_utils import extract_signer, extract_addresses, contains_jito_tip_account, b58encode
 from constants import JUPITER_PROGRAMS, SOL_MINT, WELL_KNOWN_TOKENS, JITO_TIP_ACCOUNTS
 
 logger = logging.getLogger(__name__)
@@ -50,9 +50,13 @@ class TransactionAnalyzer:
         self.detector = SwapDetector()
         self.min_swaps = min_swaps
 
-    def analyze(self, transaction_data, slot: int, block_time: int = 0, tx_index: int = 0) -> Optional[ArbitrageTransaction]:
+    def analyze(self, transaction_data, slot: int, block_time: int = 0, tx_index: int = 0,
+                swaps: Optional[List[Dict]] = None) -> Optional[ArbitrageTransaction]:
         """Analyze a single transaction for arbitrage patterns.
-        Returns ArbitrageTransaction if arb detected, None otherwise."""
+        Returns ArbitrageTransaction if arb detected, None otherwise.
+
+        `swaps` may be passed in to reuse an already-computed swap detection
+        (avoids running the detector twice per transaction)."""
 
         # Extract signature
         try:
@@ -71,8 +75,9 @@ class TransactionAnalyzer:
         if not signer:
             return None
 
-        # Detect swaps
-        swaps = self.detector.analyze_transaction(transaction_data)
+        # Detect swaps (reuse precomputed detection when provided)
+        if swaps is None:
+            swaps = self.detector.analyze_transaction(transaction_data)
         if len(swaps) < self.min_swaps:
             return None
 
@@ -196,7 +201,7 @@ class TransactionAnalyzer:
             account_keys = transaction_data.transaction.message.account_keys
             signer_index = None
             for i, key in enumerate(account_keys):
-                addr = base58.b58encode(key).decode('utf-8')
+                addr = b58encode(key)
                 if addr == signer:
                     signer_index = i
                     break
@@ -259,7 +264,7 @@ class TransactionAnalyzer:
 
             total_tip = 0
             for i, key in enumerate(all_keys):
-                addr = base58.b58encode(key).decode('utf-8')
+                addr = b58encode(key)
                 if addr in JITO_TIP_ACCOUNTS and i < len(meta.pre_balances) and i < len(meta.post_balances):
                     change = meta.post_balances[i] - meta.pre_balances[i]
                     if change > 0:

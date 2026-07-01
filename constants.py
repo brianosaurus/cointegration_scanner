@@ -193,6 +193,16 @@ FARTCOIN_MINT = "9BB6NFEcjBCtnNLFko2FqVQBq8HHM13kCyYcdQbgpump"
 MEW_MINT = "MEW1gQWJ3nEXg2qgERiKu7FAFj79PHvQVREQUzScPP5"
 AI16Z_MINT = "HeLp6NuQkmYB4pYWo2zYs22mESHXPQYzXbB8n4V98jwC"
 POPCAT_MINT = "7GCihgDB8fe6KNjn2MYtkzZcRjQy3t9GHdC8uHYmW2hr"
+DRIFT_MINT = "DriFtupJYLTosbwoN8koMbEYSx54aFAVLddWsbksjwg7"
+KMNO_MINT = "KMNo3nJsBXfcpJTVhZcXLW7RmTwTt4GVFE7suUBo9sS"
+TNSR_MINT = "TNSRxcUxoT9xBG3de7PiJyTDYu7kskLqcpddxnEJAS6"
+W_MINT = "85VBFQZC9TZkfaptBWjvUw7YbZjy52A6mjtPGjstQAmQ"
+INF_MINT = "5oVNBeEEQvYi1cX3ir8Dx5n1P7pdxydbGF2X4TxVusJm"
+BOME_MINT = "ukHH6c7mMyiWCf1b9pnWe25TSpkDDt3H5pQZgZ74J82"
+GOAT_MINT = "CzLSujWBLFsSjncfkh59rUFqvafWcY5tzedWJSuypump"
+PENGU_MINT = "2zMMhcVQEXDtdE6vsFS7S7D5oUodfJHE8vd1gnBouauv"
+PNUT_MINT = "2qEHjDLDLbuBgRYvsxhc5D6uDWAivNFZGan56P1tpump"
+ACT_MINT = "GJAFwWjJ3vnTsrQVabjBVK2TYB1YtRCQXRDfDgUnpump"
 
 # Well-known token metadata
 WELL_KNOWN_TOKENS = {
@@ -222,6 +232,16 @@ WELL_KNOWN_TOKENS = {
     MEW_MINT: {"symbol": "MEW", "name": "cat in a dogs world", "decimals": 5},
     AI16Z_MINT: {"symbol": "ai16z", "name": "ai16z", "decimals": 9},
     POPCAT_MINT: {"symbol": "POPCAT", "name": "Popcat", "decimals": 9},
+    DRIFT_MINT: {"symbol": "DRIFT", "name": "Drift Protocol", "decimals": 6},
+    KMNO_MINT: {"symbol": "KMNO", "name": "Kamino", "decimals": 6},
+    TNSR_MINT: {"symbol": "TNSR", "name": "Tensor", "decimals": 9},
+    W_MINT: {"symbol": "W", "name": "Wormhole", "decimals": 6},
+    INF_MINT: {"symbol": "INF", "name": "Sanctum Infinity", "decimals": 9},
+    BOME_MINT: {"symbol": "BOME", "name": "Book of Meme", "decimals": 6},
+    GOAT_MINT: {"symbol": "GOAT", "name": "Goatseus Maximus", "decimals": 6},
+    PENGU_MINT: {"symbol": "PENGU", "name": "Pudgy Penguins", "decimals": 6},
+    PNUT_MINT: {"symbol": "PNUT", "name": "Peanut the Squirrel", "decimals": 6},
+    ACT_MINT: {"symbol": "ACT", "name": "Act I The AI Prophecy", "decimals": 6},
 }
 
 # Stablecoin mints (for quote-token normalization)

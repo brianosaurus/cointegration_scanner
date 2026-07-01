@@ -12,12 +12,22 @@ Usage:
     python scanner.py --zscore                        # Update z-scores for known baskets
 """
 
+import os
+
+# Cap BLAS/OpenMP thread pools BEFORE numpy/statsmodels are imported. The
+# cointegration tests issue thousands of small linear-algebra ops (Johansen
+# eigendecomposition, ADF, OLS); without this, OpenBLAS/MKL fan each one across
+# every core and saturate the box (observed ~322% CPU) for no throughput gain.
+# Must run before the first numpy import (pulled in via cointegration below).
+for _var in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS",
+             "NUMEXPR_NUM_THREADS", "VECLIB_MAXIMUM_THREADS"):
+    os.environ.setdefault(_var, "1")
+
 import argparse
 import asyncio
 import csv
 import json
 import logging
-import os
 import sys
 import time
 
@@ -63,6 +73,13 @@ def parse_args():
                         help='Lookback periods for z-score window (default: 60)')
     parser.add_argument('--max-baskets', type=int, default=500,
                         help='Max number of baskets to test (default: 500)')
+    parser.add_argument('--analysis-days', type=int, default=30,
+                        help='Only load the last N days of cached prices for analysis; '
+                             'bounds per-scan CPU. Non-destructive. 0 = no bound (default: 30)')
+    parser.add_argument('--prune-days', type=int, default=0,
+                        help='DELETE cached prices older than N days from the (shared) DB. '
+                             'Off by default because price_cache is read by other tools. '
+                             '0 = never prune (default: 0)')
     parser.add_argument('--basket-size', type=int, default=4, choices=[2, 3, 4],
                         help='Number of tokens per basket (default: 4)')
     parser.add_argument('--no-fetch', action='store_true',
@@ -154,8 +171,19 @@ async def run_scan(db: Database, config: Config, args):
             mints = list(WELL_KNOWN_TOKENS.keys())
         await fetch_jupiter_prices(price_builder, mints)
 
+    # Optional, opt-in destructive prune of the shared price_cache (off by default).
+    if args.prune_days > 0:
+        prune_cutoff = int(time.time()) - args.prune_days * 86400
+        pruned = db.prune_price_cache(prune_cutoff)
+        if pruned:
+            print(f"  Pruned {pruned:,} price rows older than {args.prune_days}d")
+
+    # Non-destructive analysis window: only feed the last N days to the tests so
+    # per-scan CPU stays flat even as the shared cache keeps growing.
+    analysis_cutoff = int(time.time()) - args.analysis_days * 86400 if args.analysis_days > 0 else 0
+
     print(f"\n  Building price series...")
-    series = price_builder.build_all_series(token_filter=token_filter)
+    series = price_builder.build_all_series(token_filter=token_filter, start_time=analysis_cutoff)
 
     if not series:
         print("\n  No price data available. Run with --loop to accumulate Jupiter prices over time.")
@@ -222,7 +250,8 @@ async def run_zscore(db: Database, config: Config, args):
             all_mints.update(row['mints'])
         await fetch_jupiter_prices(price_builder, list(all_mints))
 
-    series = price_builder.build_all_series(token_filter=token_filter)
+    analysis_cutoff = int(time.time()) - args.analysis_days * 86400 if args.analysis_days > 0 else 0
+    series = price_builder.build_all_series(token_filter=token_filter, start_time=analysis_cutoff)
 
     if not series:
         print("\n  No price data available for z-score update.")

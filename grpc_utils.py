@@ -3,7 +3,18 @@ Utility functions for gRPC transaction processing — adapted from arbito/grpc_u
 """
 
 import base58
+from functools import lru_cache
 from constants import JUPITER_PROGRAMS, KNOWN_BOT_WALLETS, JITO_TIP_ACCOUNTS
+
+
+@lru_cache(maxsize=200000)
+def b58encode(byte_data: bytes) -> str:
+    """Base58-encode 32-byte account keys, memoized across the whole run.
+
+    The same program IDs and token accounts recur in nearly every transaction,
+    so caching avoids re-running the (relatively expensive) encode millions of
+    times. `byte_data` must be bytes (hashable) for the cache to work."""
+    return base58.b58encode(byte_data).decode('utf-8')
 
 
 def extract_signer(transaction) -> str:
@@ -16,7 +27,7 @@ def extract_signer(transaction) -> str:
 
         message = tx.message
         for account_key in message.account_keys:
-            return base58.b58encode(account_key).decode('utf-8')
+            return b58encode(account_key)
     except Exception:
         pass
     return ""
@@ -38,13 +49,13 @@ def extract_addresses(transaction, meta) -> list[str]:
 
     message = tx.message
     for account_key in message.account_keys:
-        addresses.append(base58.b58encode(account_key).decode('utf-8'))
+        addresses.append(b58encode(account_key))
 
     for loaded_writable in meta.loaded_writable_addresses:
-        addresses.append(base58.b58encode(loaded_writable).decode('utf-8'))
+        addresses.append(b58encode(loaded_writable))
 
     for loaded_readonly in meta.loaded_readonly_addresses:
-        addresses.append(base58.b58encode(loaded_readonly).decode('utf-8'))
+        addresses.append(b58encode(loaded_readonly))
 
     return addresses
 

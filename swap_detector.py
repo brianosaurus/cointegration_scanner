@@ -3,8 +3,8 @@ Swap detector — adapted from arbito/swap_detector.py
 Detects swaps and extracts pool/vault info from gRPC transaction data
 """
 
-import base58
 from typing import List, Dict, Optional, Any
+from grpc_utils import b58encode
 from constants import (
     PUMPSWAP, RAYDIUM_AMM_V4, METEORA_DLMM, RAYDIUM_CLMM, RAYDIUM_CPMM, WHIRLPOOL,
     RAYDIUM_AMM_V4_PROGRAM, METEORA_DLMM_PROGRAM, METEORA_DAMM_PROGRAM,
@@ -81,7 +81,7 @@ class SwapDetector:
     def bytes_to_address(self, byte_data: bytes) -> str:
         if len(byte_data) != 32:
             raise ValueError(f"Address must be 32 bytes, got {len(byte_data)}")
-        return base58.b58encode(byte_data).decode('utf-8')
+        return b58encode(byte_data)
 
     def get_account_at_index(self, transaction_data, index: int) -> Optional[str]:
         """Get account address at given index, handling base accounts and loaded addresses"""

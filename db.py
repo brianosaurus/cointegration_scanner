@@ -220,6 +220,18 @@ class Database:
                 pass
         self.conn.commit()
 
+    def prune_price_cache(self, cutoff_timestamp: int) -> int:
+        """Delete price_cache rows older than cutoff_timestamp (unix seconds).
+
+        Bounds the otherwise-unbounded growth of the Jupiter price cache: without
+        this the table gains a row per token per scan forever, inflating both the
+        DB file and the per-scan series length. Returns the number of rows deleted."""
+        cur = self.conn.execute(
+            "DELETE FROM price_cache WHERE timestamp < ?", (cutoff_timestamp,)
+        )
+        self.conn.commit()
+        return cur.rowcount
+
     def get_cached_prices(self, token_mint: str, quote_mint: str = None,
                           start_time: int = 0, end_time: int = None,
                           source: str = None) -> list:

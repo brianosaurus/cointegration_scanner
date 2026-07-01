@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -c \"import tracker, transaction_analyzer, swap_detector, grpc_utils; print\\('imports OK'\\)\")",
+      "Bash(python -m py_compile tracker.py transaction_analyzer.py swap_detector.py grpc_utils.py)",
+      "Bash(.venv/bin/python -c \"import grpc_utils, swap_detector, transaction_analyzer, tracker; print\\('imports OK'\\); print\\('b58:', grpc_utils.b58encode\\(bytes\\(range\\(32\\)\\)\\)\\); print\\('cache before:', grpc_utils.b58encode.cache_info\\(\\)\\); grpc_utils.b58encode\\(bytes\\(range\\(32\\)\\)\\); print\\('cache after:', grpc_utils.b58encode.cache_info\\(\\)\\)\")",
+      "Bash(timeout 25 ssh -o ConnectTimeout=10 -o BatchMode=yes frankfurt \"cd cointegration_scanner 2>/dev/null && echo '--- remote scanner.py: resample/max-pairs support ---' && grep -nE 'resample|max.pairs|max-baskets|interval' scanner.py | grep add_argument; echo '--- running processes ---'; ps aux | grep -E 'scanner.py|python3' | grep -v grep\")",
+      "Bash(timeout 25 ssh -o ConnectTimeout=10 -o BatchMode=yes frankfurt ' *)",
+      "Bash(.venv/bin/python -c ' *)",
+      "Bash(timeout 30 ssh -o ConnectTimeout=10 -o BatchMode=yes frankfurt \"cd cointegration_scanner && tar xzf -\")",
+      "Bash(timeout 30 ssh -o ConnectTimeout=10 -o BatchMode=yes frankfurt ' *)",
+      "Bash(.venv/bin/python -m py_compile scanner.py price_builder.py db.py)",
+      "Bash(timeout 150 ssh -o ConnectTimeout=10 -o BatchMode=yes frankfurt ' *)",
+      "Bash(timeout 20 ssh -o ConnectTimeout=10 -o BatchMode=yes frankfurt ' *)"
+    ]
+  }
+}

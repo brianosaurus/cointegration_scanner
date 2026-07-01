@@ -44,7 +44,7 @@ class PriceBuilder:
         self.config = config
 
     def build_all_series(self, token_filter: Optional[Set[str]] = None,
-                         **kwargs) -> Dict[str, pd.DataFrame]:
+                         start_time: int = 0, **kwargs) -> Dict[str, pd.DataFrame]:
         """
         Build price series from cached Jupiter prices.
 
@@ -52,9 +52,10 @@ class PriceBuilder:
           - index: DatetimeIndex
           - columns: ['price'] (USD via Jupiter)
 
-        Data persists across restarts — no warmup needed.
+        Data persists across restarts — no warmup needed. Pass start_time (unix
+        seconds) to bound the series to a retention window; 0 means no bound.
         """
-        prices = self._load_cached_prices(token_filter, source='jupiter')
+        prices = self._load_cached_prices(token_filter, source='jupiter', start_time=start_time)
         logger.info(f"Loaded {len(prices)} cached Jupiter prices")
 
         if not prices:
@@ -67,7 +68,8 @@ class PriceBuilder:
         return series
 
     def _load_cached_prices(self, token_filter: Optional[Set[str]] = None,
-                            source: Optional[str] = None) -> List[PricePoint]:
+                            source: Optional[str] = None,
+                            start_time: int = 0) -> List[PricePoint]:
         """Load previously cached prices from the database."""
         tokens = token_filter or set()
         if not tokens:
@@ -75,7 +77,7 @@ class PriceBuilder:
 
         prices = []
         for mint in tokens:
-            rows = self.db.get_cached_prices(mint, source=source)
+            rows = self.db.get_cached_prices(mint, source=source, start_time=start_time)
             for row in rows:
                 prices.append(PricePoint(
                     token_mint=row[0],

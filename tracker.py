@@ -18,7 +18,6 @@ import time
 from config import Config
 from block_fetcher import BlockFetcher
 from transaction_analyzer import TransactionAnalyzer
-from swap_detector import SwapDetector
 from db import Database
 from csv_writer import CsvWriter
 from display import print_arbitrage, print_progress, print_summary
@@ -49,15 +48,6 @@ def parse_args():
     return parser.parse_args()
 
 
-def _extract_tx_pools(tx, swap_detector: SwapDetector) -> set:
-    """Extract pool addresses touched by a transaction (lightweight, for backrun detection)."""
-    try:
-        swaps = swap_detector.analyze_transaction(tx)
-        return {s.get('pool_address') for s in swaps if s.get('pool_address')}
-    except Exception:
-        return set()
-
-
 async def process_block(block, slot, analyzer, db, csv_writer, signer_filter, stats):
     """Process all transactions in a block."""
     if not hasattr(block, 'transactions'):
@@ -69,10 +59,15 @@ async def process_block(block, slot, analyzer, db, csv_writer, signer_filter, st
 
     for tx_index, tx in enumerate(block.transactions):
         try:
-            arb = analyzer.analyze(tx, slot, block_time, tx_index=tx_index)
+            # Detect swaps once, then reuse for both arb analysis and backrun
+            # pool tracking (previously the detector ran twice per non-arb tx).
+            swaps = analyzer.detector.analyze_transaction(tx)
+            tx_pools = {s.get('pool_address') for s in swaps if s.get('pool_address')}
+
+            arb = analyzer.analyze(tx, slot, block_time, tx_index=tx_index, swaps=swaps)
             if arb is None:
                 # Track pools for backrun detection even on non-arb txs
-                prev_tx_pools = _extract_tx_pools(tx, analyzer.detector)
+                prev_tx_pools = tx_pools
                 continue
 
             if signer_filter and arb.signer != signer_filter:
